@@ -1,0 +1,11 @@
+{
+  "name": "claude-deep-space",
+  "owner": { "name": "cstillick" },
+  "plugins": [
+    {
+      "name": "deep-space",
+      "source": "./",
+      "description": "A deep-black Claude Code theme: a slowly animated pixel-art Hubble deep field behind the desktop and mobile apps, plus a matching terminal color theme."
+    }
+  ]
+}
