@@ -28,6 +28,16 @@ In the desktop app, where `/plugin` does not run: click **+** next to the prompt
 
 The background and colors appear when a session starts, so start a new session after installing. To use the terminal colors, run `/theme` and pick **Deep space**.
 
+## Turning it on and off
+
+| Type | What it does |
+| --- | --- |
+| `/deep-space` | Switches the theme off if it's showing, on if it isn't |
+| `/deep-space off` | Goes back to the app's own look, in this session and new ones |
+| `/deep-space on` | Brings the deep field and colors back, and paints them again if another theme replaced them |
+
+The choice is kept between sessions. It runs right away, even while Claude is mid-reply.
+
 ## Where it shows
 
 | Surface | What you get |
@@ -51,7 +61,8 @@ Open `preview.svg` in a browser to watch the result.
 
 ## Files
 
-- `hooks/register.tsx`: sets the theme when a session starts and draws the background
+- `hooks/register.tsx`: sets the theme when a session starts, serves `/deep-space`, and draws the background
+- `tests/deep-space.test.tsx`: run with `claude plugin test .`
 - `hooks/scene.js`: the animated SVG scene
 - `hooks/make-colors.js`: the design system's palette builder, used to make the app colors
 - `themes/deep-space.json`: the terminal color theme
