@@ -1,12 +1,18 @@
 // Builds the "Deep space" backdrop: a Hubble-deep-field-style pixel-art scene.
 // Usage: node gen-scene.mjs <out hooks/scene.js> [<out preview.svg>]
 //
-// Still parts (field stars, distant galaxies, the elliptical, the edge-on disk)
-// are rasterised here onto a 384x240 grid with ordered dithering. The spiral
-// galaxies are vector art that slowly rotates; an SVG filter snaps them onto
-// the same grid, dither and all, so they turn as pixel art. Every animation
-// steps on a shared half-second beat, so the scene repaints twice a second;
-// only the brief shooting stars move faster.
+// Everything is rasterised here onto a 384x240 grid with ordered dithering:
+// the field stars, distant galaxies, the elliptical and the edge-on disk once,
+// and each turning spiral as eight frames over half a turn, which CSS shows in
+// turn. Twinkles and spikes step on a shared half-second beat; the frames hold
+// for whole seconds, and only the brief shooting stars move faster.
+//
+// The desktop app draws a scene still, with no error, if its SVG uses any of
+// these, so the scene uses none of them (tests/deep-space.test.tsx checks):
+// - shape-rendering, as an attribute or in CSS, whatever its value
+// - an @media rule other than prefers-reduced-motion (aspect-ratio,
+//   orientation, width and the rest)
+// - the filter steps feTile and feImage
 import { writeFileSync } from 'node:fs'
 
 const W = 384, H = 240
@@ -121,73 +127,29 @@ function paths(m, attrs = '') {
   return out
 }
 
-// ---- Live spirals: vector art, spun by CSS, snapped to the pixel grid by a filter.
-const LEVELS = [0, 0.05, 0.14, 0.3, 0.5, 0.75, 1]
-const hex2 = v => Math.round(v * 255).toString(16).padStart(2, '0')
-function pixelFilter(id, X, Y, FW, FH) {
-  let bay = '', merge = ''
-  for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
-    const g = hex2(BAYER[j * 4 + i])
-    bay += `<feFlood x="${X + i}" y="${Y + j}" width="1" height="1" flood-color="#${g}${g}${g}" result="b${j * 4 + i}"/>`
-    merge += `<feMergeNode in="b${j * 4 + i}"/>`
-  }
-  const tv = LEVELS.join(' ')
-  return `<filter id="${id}" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="${X}" y="${Y}" width="${FW}" height="${FH}" color-interpolation-filters="sRGB">`
-    + `<feGaussianBlur in="SourceGraphic" stdDeviation="0.55" result="s"/><feFlood flood-color="#000" result="k"/><feMerge result="o"><feMergeNode in="k"/><feMergeNode in="s"/></feMerge>`
-    + `${bay}<feMerge x="${X}" y="${Y}" width="4" height="4" result="bt">${merge}</feMerge><feTile in="bt" result="bay"/>`
-    + `<feComposite in="o" in2="bay" operator="arithmetic" k2="1" k3="${f1(1000 / LEVELS.length) / 1000}" result="d"/>`
-    + `<feComponentTransfer in="d" result="q"><feFuncR type="discrete" tableValues="${tv}"/><feFuncG type="discrete" tableValues="${tv}"/><feFuncB type="discrete" tableValues="${tv}"/></feComponentTransfer>`
-    + `<feColorMatrix in="q" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 12 12 12 0 0" result="p"/>`
-    + `<feFlood x="${X + 0.4}" y="${Y + 0.4}" width="0.2" height="0.2" flood-color="#fff" result="dot"/><feComposite in="dot" in2="dot" x="${X}" y="${Y}" width="1" height="1" result="cell"/><feTile in="cell" result="dots"/>`
-    + `<feComposite in="p" in2="dots" operator="in"/><feMorphology operator="dilate" radius="0.45"/></filter>`
-}
-
+// ---- Turning spirals: pre-drawn pixel-art frames, shown one at a time.
+// The desktop app stops animating a scene whose SVG has certain filter steps
+// (feTile, feImage), so the spirals are drawn here by the same rasteriser as
+// the still galaxies, at evenly spaced turns, and CSS shows each frame in turn.
+// A two-armed spiral looks the same after half a turn, so the frames cover 180°.
 const liveRects = []
-function liveSpiral({ id, cx, cy, R, q, paDeg, pitch = 0.28, twist = 0, knots = 24, arm = 'blue', period, cls }) {
-  const k = 1 / Math.tan(pitch)
-  const armPts = (j, r0, r1, dth = 0) => {
-    let d = ''
-    const N = Math.max(14, Math.round(R * 0.9))
-    for (let t = 0; t <= N; t++) {
-      const r = r0 * Math.pow(r1 / r0, t / N), th = k * Math.log(r) + Math.PI * j + twist + dth
-      d += `${t ? 'L' : 'M'}${f1(R * r * Math.cos(th))} ${f1(R * r * Math.sin(th))}`
-    }
-    return d
+const frameCss = new Set()
+function frameSpiral({ cx, cy, R, q, paDeg, pitch = 0.28, twist = 0, knots = 24, arm = 'cool', bright = 1, period, frames, cls }) {
+  const reach = R * 1.25 + 1
+  liveRects.push([Math.floor(cx - reach), Math.floor(cy - reach * Math.max(q, 0.75)), Math.ceil(cx + reach), Math.ceil(cy + reach * Math.max(q, 0.75))])
+  const half = period / 2, slot = half / frames
+  const s0 = seed
+  let s1 = seed, out = ''
+  for (let i = 0; i < frames; i++) {
+    seed = s0 // the same knots in every frame, turned with the arms
+    const b = newBuf()
+    render(b, spiral({ cx, cy, R, q, pa: paDeg * Math.PI / 180, pitch, bright, knots, bulge: 0.12, armRamp: arm, coreRamp: 'warm', twist: twist + 2 * Math.PI * i / frames, dust: 0.5 }), cx, cy, reach)
+    s1 = seed
+    out += `<g class="fr${i ? '' : ' f0'}" style="animation-name:fr${frames};animation-duration:${half}s;animation-delay:-${f1((frames - i) % frames * slot * 100) / 100}s">${paths(quantize(b))}</g>`
   }
-  // Muted, Hubble-like colours: the filter's posterising saturates, so start soft.
-  const cols = arm === 'pink'
-    ? { mid: '#c08ad2', out: '#6a4298', knot: '#ff7ab8', disk: '#1e1030' }
-    : { mid: '#9ab0e6', out: '#4566b8', knot: '#ff78b4', disk: '#0f1834' }
-  const g = `g${id}`, cg = `c${id}`, dg = `d${id}`
-  let body = `<circle r="${f1(R * 1.05)}" fill="url(#${dg})"/>`
-  // Three widths per arm, each reaching less far, so the arms taper and fade.
-  const layers = [[0.22, 0.5, 0.1, 1.02], [0.11, 0.8, 0.1, 0.92], [0.05, 0.85, 0.12, 0.8], [0.022, 0.9, 0.16, 0.66]]
-  for (const [w, op, r0, r1] of layers) for (const j of [0, 1]) body += `<path d="${armPts(j, r0, r1)}" fill="none" stroke="url(#${g})" stroke-width="${f1(Math.max(0.7, w * R))}" stroke-linecap="round" opacity="${op}"/>`
-  // Spurs: short, faint feathers off the arms, as in a flocculent disk.
-  for (let i = 0; i < Math.round(R / 5); i++) {
-    const j = i % 2, r0 = 0.3 + rnd() * 0.45, r1 = r0 + 0.12 + rnd() * 0.18
-    body += `<path d="${armPts(j, r0, r1, 0.25 + rnd() * 0.35)}" fill="none" stroke="url(#${g})" stroke-width="${f1(Math.max(0.6, 0.035 * R))}" stroke-linecap="round" opacity="${f1(0.25 + rnd() * 0.25)}"/>`
-  }
-  for (const j of [0, 1]) body += `<path d="${armPts(j, 0.16, 0.7, -0.2)}" fill="none" stroke="#000" stroke-width="${f1(Math.max(0.6, 0.026 * R))}" opacity=".7"/>`
-  // Star-forming knots, in clumps along the arms, each its own size and brightness.
-  for (let i = 0; i < knots; i++) {
-    const r = 0.25 + Math.pow(rnd(), 0.8) * 0.68, j = rnd() < 0.5 ? 0 : 1
-    const th = k * Math.log(r) + Math.PI * j + twist + (rnd() - 0.5) * 0.3
-    const c = rnd() < 0.65 ? cols.knot : '#d6e4ff'
-    body += `<circle cx="${f1(R * r * Math.cos(th))}" cy="${f1(R * r * Math.sin(th))}" r="${f1(Math.max(0.45, (0.008 + rnd() * 0.02) * R))}" fill="${c}" opacity="${f1(0.45 + rnd() * 0.55)}"/>`
-  }
-  body += `<circle r="${f1(0.55 * R)}" fill="url(#${cg})" opacity=".45"/><circle r="${f1(0.3 * R)}" fill="url(#${cg})"/>`
-  const defs = `<radialGradient id="${g}" gradientUnits="userSpaceOnUse" r="${f1(R)}"><stop offset="0" stop-color="#ffe7b0"/><stop offset=".2" stop-color="#e9b86a"/><stop offset=".4" stop-color="${cols.mid}"/><stop offset=".75" stop-color="${cols.out}" stop-opacity=".8"/><stop offset="1" stop-color="${cols.out}" stop-opacity=".4"/></radialGradient>`
-    + `<radialGradient id="${cg}"><stop offset="0" stop-color="#fff8e6"/><stop offset=".3" stop-color="#ffd890"/><stop offset=".65" stop-color="#b9772f" stop-opacity=".8"/><stop offset="1" stop-color="#5a3414" stop-opacity="0"/></radialGradient>`
-    + `<radialGradient id="${dg}"><stop offset="0" stop-color="${cols.disk}" stop-opacity=".7"/><stop offset=".55" stop-color="${cols.disk}" stop-opacity=".3"/><stop offset="1" stop-color="${cols.disk}" stop-opacity="0"/></radialGradient>`
-  // Room for the widest stroke's round cap past the disk's edge, and the blur.
-  const m = Math.ceil(R * 1.15 + 3)
-  const X = Math.floor((cx - m) / 4) * 4, Y = Math.floor((cy - m) / 4) * 4
-  const FW = Math.ceil((cx + m - X) / 4) * 4, FH = Math.ceil((cy + m - Y) / 4) * 4
-  liveRects.push([X, Y, X + FW, Y + FH])
-  // Arms wind outward with rising angle, so trailing arms mean turning the other way.
-  const svg = `<g class="${cls}" filter="url(#f${id})"><g transform="translate(${cx} ${cy}) rotate(${paDeg}) scale(1 ${q})"><g class="sp" style="animation-duration:${period}s;animation-timing-function:steps(${Math.round(period / BEAT)})">${body}</g></g></g>`
-  return { defs: defs + pixelFilter(`f${id}`, X, Y, FW, FH), svg }
+  seed = s1
+  frameCss.add(`@keyframes fr${frames}{0%{opacity:1}${f1(100000 / frames) / 1000}%,100%{opacity:0}}`)
+  return { defs: '', svg: `<g class="${cls}"><g fill="none" stroke-width="1">${out}</g></g>` }
 }
 
 const quiet = (x, y) => (Math.abs(x - W / 2) < 95 && y > 55 && y < 190) || (y > 200 && Math.abs(x - W / 2) < 120)
@@ -219,10 +181,11 @@ const heroC = still(edgeOn({ cx: 50, cy: 176, R: 46, pa: -0.42, bright: 1.05, th
 
 // ---- The turning spirals: a grand design at top right (one turn in 4 minutes),
 // a pink one at lower right (3 minutes) and the elliptical's small companion (2).
+const FRAMES = +(process.env.FRAMES ?? 8)
 const live = [
-  liveSpiral({ id: 'A', cx: 322, cy: 54, R: 44, q: 0.72, paDeg: -28, twist: 1.2, knots: 52, period: 240, cls: 'ha' }),
-  liveSpiral({ id: 'D', cx: 346, cy: 196, R: 20, q: 0.55, paDeg: 52, pitch: 0.4, twist: 3.5, knots: 20, arm: 'pink', period: 180, cls: 'hd' }),
-  liveSpiral({ id: 'E', cx: 79, cy: 59, R: 8, q: 0.5, paDeg: 63, pitch: 0.34, twist: 2, knots: 4, period: 120, cls: 'hb' }),
+  frameSpiral({ cx: 322, cy: 54, R: 36, q: 0.72, paDeg: -28, twist: 1.2, knots: 32, period: 240, frames: FRAMES, cls: 'ha' }),
+  frameSpiral({ cx: 346, cy: 196, R: 20, q: 0.55, paDeg: 52, pitch: 0.4, twist: 3.5, knots: 14, arm: 'pink', period: 176, frames: FRAMES, cls: 'hd' }),
+  frameSpiral({ cx: 79, cy: 59, R: 8, q: 0.5, paDeg: 63, pitch: 0.34, twist: 2, knots: 3, period: 120, frames: FRAMES, cls: 'hb' }),
 ]
 const inLive = (x, y, pad = 4) => liveRects.some(([a, b, c, d]) => x >= a - pad && x < c + pad && y >= b - pad && y < d + pad)
 
@@ -282,30 +245,27 @@ meteors.forEach(([x, y, [dx, dy], period, first], i) => {
     const px = Math.round(x - (sx / n) * t * 1.1), py = Math.round(y - (sy / n) * t * 1.1)
     put(m, t === 0 ? '#ffffff' : RAMPS.cool[Math.max(1, 7 - Math.ceil(t * 6 / len))], px, py)
   }
-  const end = f1(1.1 / period * 1000) / 10 // percent of the cycle spent crossing
-  meteorCss += `@keyframes mt${i}{0%{opacity:1;transform:translate(0,0)}${f1(end * 0.6)}%{opacity:1}${end}%,100%{opacity:0;transform:translate(${dx}px,${dy}px)}}`
+  const end = +(1.1 / period * 100).toFixed(2) // percent of the cycle spent crossing
+  meteorCss += `@keyframes mt${i}{0%{opacity:1;transform:translate(0,0)}${+(end * 0.6).toFixed(2)}%{opacity:1}${end}%,100%{opacity:0;transform:translate(${dx}px,${dy}px)}}`
   meteorSvg += `<g class="mt" style="animation-name:mt${i};animation-duration:${period}s;animation-delay:${first - period}s">${paths(m)}</g>`
 })
 
 // ---- A satellite: a dim point drifting across the top of the sky, one pixel
 // a beat, every five minutes. Level, so every step lands on a whole pixel.
 const satCross = W + 8, satPeriod = 300, satTime = satCross * BEAT
-const satPct = f1(satTime / satPeriod * 1000) / 10, satHold = f1(satPct - 0.1)
+const satPct = +(satTime / satPeriod * 100).toFixed(2), satHold = +(satPct - 0.1).toFixed(2)
 meteorCss += `@keyframes sat{0%{transform:translate(0,0);opacity:1}${satHold}%{opacity:1}${satPct}%{transform:translate(${satCross}px,0)}${satPct}%,100%{opacity:0;transform:translate(${satCross}px,0)}}`
 const satM = new Map(); put(satM, RAMPS.star[4], 0, 30)
 meteorSvg += `<g class="sat" style="animation-duration:${satPeriod}s;animation-timing-function:steps(${Math.round(satTime / BEAT)},end);animation-delay:-${satPeriod - 30}s">${paths(satM)}</g>`
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges"><style>
-.sp{animation:sp 600s infinite}@keyframes sp{to{transform:rotate(-360deg)}}
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice"><style>
+.fr{opacity:0;animation:none 60s steps(1,end) infinite}.f0{opacity:1}${[...frameCss].join('')}
 .tw{animation:tw 8s steps(7,jump-none) infinite alternate}.l2{animation-name:tw2}.l3{animation-name:tw3}
 @keyframes tw{from{opacity:1}to{opacity:.12}}@keyframes tw2{from{opacity:1}to{opacity:.3}}@keyframes tw3{from{opacity:.85}to{opacity:.05}}
 .sk{animation:sk 8s steps(7,jump-none) infinite alternate}@keyframes sk{from{opacity:0}to{opacity:1}}
 .mt,.sat{opacity:0;animation:none 60s steps(10,end) infinite}.sat{animation-name:sat}${meteorCss}
-@media (max-aspect-ratio:1/1){.ha{transform:translate(-100px,4px)}.hd{transform:translate(-148px,-60px)}}
-@media (max-aspect-ratio:3/5){.ha{transform:translate(-112px,4px)}.hd{transform:translate(-176px,-64px)}}
-@media (min-aspect-ratio:2/1){.ha,.hb{transform:translate(0,24px)}.hc{transform:translate(0,-24px)}.hd{transform:translate(0,-28px)}}
-@media (prefers-reduced-motion:reduce){.sp,.tw,.sk,.mt,.sat{animation:none}}
-</style><defs>${live.map(l => l.defs).join('')}</defs><rect width="${W}" height="${H}" fill="#000"/><g fill="none" stroke-width="1">${paths(fieldPx)}<g class="hb">${paths(heroB)}</g><g class="hc">${paths(heroC)}</g>${paths(spikeBase)}${spikeSvg}${twSvg}${meteorSvg}</g>${live.map(l => l.svg).join('')}</svg>`
+@media (prefers-reduced-motion:reduce){.fr,.tw,.sk,.mt,.sat{animation:none}}
+</style><rect width="${W}" height="${H}" fill="#000"/><g fill="none" stroke-width="1">${paths(fieldPx)}<g class="hb">${paths(heroB)}</g><g class="hc">${paths(heroC)}</g>${paths(spikeBase)}${spikeSvg}${twSvg}${meteorSvg}</g>${live.map(l => l.svg).join('')}</svg>`
 
 writeFileSync(process.argv[2], `// Generated by gen-scene.mjs: the "Deep space" backdrop, a pixel-art deep field\n// with slowly turning galaxies. It runs no script and loads nothing; CSS inside\n// its own <style> moves it.\nexport const SCENE = ${JSON.stringify(svg)}\n`)
 if (process.argv[3]) writeFileSync(process.argv[3], svg)

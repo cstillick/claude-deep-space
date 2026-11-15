@@ -4,7 +4,7 @@ A deep-black theme for Claude Code, after the Hubble Deep Field. It runs as a mo
 
 ![A pixel-art deep field: a turning spiral galaxy, an elliptical, an edge-on disk and spiked stars on black](assets/preview.png)
 
-- **Desktop and mobile apps:** a pixel-art deep field fills the space behind the conversation. Spiral galaxies turn in their tilted disks (one turn every 2 to 4 minutes), about a hundred stars fade up and down in palette steps, and the long spikes on the bright stars come and go. Every so often a shooting star streaks across a corner of the sky, and a satellite drifts across the top every five minutes. Everything but the shooting stars steps on one shared half-second beat, so it reads as a calm shimmer; a shooting star lasts about a second. With reduced motion turned on in your system settings, it stays still.
+- **Desktop and mobile apps:** a pixel-art deep field fills the space behind the conversation. Spiral galaxies turn in their tilted disks, a step at a time (one turn every 2 to 4 minutes), about a hundred stars fade up and down in palette steps, and the long spikes on the bright stars come and go. Every so often a shooting star streaks across a corner of the sky, and a satellite drifts across the top every five minutes. With reduced motion turned on in your system settings, it stays still.
 - **Desktop app colors:** near-black surfaces with a faint violet cast. Accents are taken from Hubble images: blue spiral arms, gold galaxy cores, pink star-forming knots.
 - **Terminal:** a matching color theme, **Deep space**, that you pick in `/theme`. The terminal app draws its own background, so set it to pure black for the deep blacks.
 
@@ -58,6 +58,8 @@ node gen-scene.mjs hooks/scene.js preview.svg
 ```
 
 Open `preview.svg` in a browser to watch the result.
+
+The desktop app draws a scene still, with no error, if its SVG uses `shape-rendering`, an `@media` rule other than `prefers-reduced-motion`, or the filter steps `feTile` or `feImage`. The scene avoids all of them, and a test fails if one comes back. That is also why the spiral galaxies are drawn as frames rather than snapped to pixels by a filter.
 
 ## Files
 

@@ -1,6 +1,8 @@
 import type { On, ThemeSetArgs } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
+import { SCENE } from '../hooks/scene.js'
+
 const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const SCENE_NAME = 'hubble-deep-field'
 // How the person's Enter in the prompt box runs a command.
@@ -125,4 +127,16 @@ test('the deep field is drawn behind desktop and mobile', async $ => {
     expect(await ui.find({ type: 'Svg' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+// The desktop app draws a scene still, with no error, when its SVG uses any of
+// these. Each was found by capturing the screen while test scenes cycled.
+test('the scene uses nothing that makes the desktop app draw it still', () => {
+  expect(SCENE.length).toBeLessThanOrEqual(131072)
+  expect(SCENE).not.toContain('shape-rendering')
+  expect(SCENE).not.toContain('<feTile')
+  expect(SCENE).not.toContain('<feImage')
+
+  const media = SCENE.match(/@media[^{]*/g) ?? []
+  expect(media.every(rule => rule.trim() === '@media (prefers-reduced-motion:reduce)')).toBe(true)
 })
