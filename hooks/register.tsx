@@ -160,7 +160,7 @@ export const register: Register = on => {
     return (
       <Svg
         source={SCENE}
-        alt="A pixel-art deep field on black: spiral galaxies turning slowly, an elliptical and an edge-on galaxy, and stars that dim and brighten"
+        alt="A pixel-art deep field on black: spiral galaxies turning slowly, an elliptical and an edge-on galaxy, stars that dim and brighten, and the odd shooting star"
         isInteractive
       />
     )

@@ -5,7 +5,8 @@
 // are rasterised here onto a 384x240 grid with ordered dithering. The spiral
 // galaxies are vector art that slowly rotates; an SVG filter snaps them onto
 // the same grid, dither and all, so they turn as pixel art. Every animation
-// steps on a shared 0.25 s beat, so the scene repaints a few times a second.
+// steps on a shared half-second beat, so the scene repaints twice a second;
+// only the brief shooting stars move faster.
 import { writeFileSync } from 'node:fs'
 
 const W = 384, H = 240
@@ -216,12 +217,12 @@ const still = (fn, cx, cy, reach) => { const b = newBuf(); render(b, fn, cx, cy,
 const heroB = still(elliptical({ cx: 46, cy: 38, R: 26, q: 0.78, pa: 0.4, bright: 1.1 }), 46, 38, 36)
 const heroC = still(edgeOn({ cx: 50, cy: 176, R: 46, pa: -0.42, bright: 1.05, thick: 0.06 }), 50, 176, 50)
 
-// ---- The turning spirals: a grand design at top right (one turn in 12 minutes),
-// a pink one at lower right (9 minutes) and the elliptical's small companion (6).
+// ---- The turning spirals: a grand design at top right (one turn in 4 minutes),
+// a pink one at lower right (3 minutes) and the elliptical's small companion (2).
 const live = [
-  liveSpiral({ id: 'A', cx: 322, cy: 54, R: 44, q: 0.72, paDeg: -28, twist: 1.2, knots: 52, period: 720, cls: 'ha' }),
-  liveSpiral({ id: 'D', cx: 346, cy: 196, R: 20, q: 0.55, paDeg: 52, pitch: 0.4, twist: 3.5, knots: 20, arm: 'pink', period: 540, cls: 'hd' }),
-  liveSpiral({ id: 'E', cx: 79, cy: 59, R: 8, q: 0.5, paDeg: 63, pitch: 0.34, twist: 2, knots: 4, period: 360, cls: 'hb' }),
+  liveSpiral({ id: 'A', cx: 322, cy: 54, R: 44, q: 0.72, paDeg: -28, twist: 1.2, knots: 52, period: 240, cls: 'ha' }),
+  liveSpiral({ id: 'D', cx: 346, cy: 196, R: 20, q: 0.55, paDeg: 52, pitch: 0.4, twist: 3.5, knots: 20, arm: 'pink', period: 180, cls: 'hd' }),
+  liveSpiral({ id: 'E', cx: 79, cy: 59, R: 8, q: 0.5, paDeg: 63, pitch: 0.34, twist: 2, knots: 4, period: 120, cls: 'hb' }),
 ]
 const inLive = (x, y, pad = 4) => liveRects.some(([a, b, c, d]) => x >= a - pad && x < c + pad && y >= b - pad && y < d + pad)
 
@@ -242,7 +243,7 @@ for (const [x, y] of starSpots) {
     const lvl = Math.max(1, Math.round(top - 1 - (s / n) * (top - 1)))
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) put(s <= len ? spikeBase : longer, r[lvl], x + dx * s, y + dy * s)
   }
-  const step = onBeat(pick([1.5, 2, 2.5])) // 7 levels each way: about 10 to 18 s
+  const step = onBeat(pick([1, 1.5, 2])) // 7 levels each way: about 7 to 14 s
   spikeSvg += `<g class="sk" style="animation-duration:${f1(step * 7 * 100) / 100}s;animation-delay:${beatDelay(96)}">${paths(longer)}</g>`
 }
 
@@ -256,22 +257,55 @@ while (made < 96) {
   const m = new Map()
   put(m, ramp[ramp.length - 1], x, y)
   if (rnd() < 0.3) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) put(m, ramp[ramp.length - 3], x + dx, y + dy)
-  const step = onBeat(pick([1, 1, 1.5, 2])) // 7 levels each way: about 7 to 14 s
+  const step = onBeat(pick([0.5, 0.5, 1, 1.5])) // 7 levels each way: about 3.5 to 10.5 s
   const low = pick(['', ' l2', ' l3'])
   twSvg += `<g class="tw${low}" style="animation-duration:${f1(step * 7 * 100) / 100}s;animation-delay:${beatDelay(96)}">${paths(m)}</g>`
   made++
 }
+
+// ---- Shooting stars: now and then a short streak crosses a corner of the sky.
+// They are the one thing off the beat: each lasts about a second, in 0.1 s
+// pixel jumps, then the sky is still again for most of a minute.
+let meteorSvg = '', meteorCss = ''
+const meteors = [
+  // start x, y, travel [dx, dy] in px (multiples of 10, so each of the 10 jumps
+  // is whole pixels), period s, first after s
+  [128, 8, [50, 20], 41, 6],
+  [372, 124, [-40, 20], 59, 21],
+  [20, 196, [40, -20], 73, 38],
+  [228, 12, [-30, 30], 97, 64],
+]
+meteors.forEach(([x, y, [dx, dy], period, first], i) => {
+  const m = new Map(), len = 9, n = Math.hypot(dx, dy), sx = dx, sy = dy
+  // The head is white; the tail falls through the cool ramp behind it.
+  for (let t = 0; t < len; t++) {
+    const px = Math.round(x - (sx / n) * t * 1.1), py = Math.round(y - (sy / n) * t * 1.1)
+    put(m, t === 0 ? '#ffffff' : RAMPS.cool[Math.max(1, 7 - Math.ceil(t * 6 / len))], px, py)
+  }
+  const end = f1(1.1 / period * 1000) / 10 // percent of the cycle spent crossing
+  meteorCss += `@keyframes mt${i}{0%{opacity:1;transform:translate(0,0)}${f1(end * 0.6)}%{opacity:1}${end}%,100%{opacity:0;transform:translate(${dx}px,${dy}px)}}`
+  meteorSvg += `<g class="mt" style="animation-name:mt${i};animation-duration:${period}s;animation-delay:${first - period}s">${paths(m)}</g>`
+})
+
+// ---- A satellite: a dim point drifting across the top of the sky, one pixel
+// a beat, every five minutes. Level, so every step lands on a whole pixel.
+const satCross = W + 8, satPeriod = 300, satTime = satCross * BEAT
+const satPct = f1(satTime / satPeriod * 1000) / 10, satHold = f1(satPct - 0.1)
+meteorCss += `@keyframes sat{0%{transform:translate(0,0);opacity:1}${satHold}%{opacity:1}${satPct}%{transform:translate(${satCross}px,0)}${satPct}%,100%{opacity:0;transform:translate(${satCross}px,0)}}`
+const satM = new Map(); put(satM, RAMPS.star[4], 0, 30)
+meteorSvg += `<g class="sat" style="animation-duration:${satPeriod}s;animation-timing-function:steps(${Math.round(satTime / BEAT)},end);animation-delay:-${satPeriod - 30}s">${paths(satM)}</g>`
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges"><style>
 .sp{animation:sp 600s infinite}@keyframes sp{to{transform:rotate(-360deg)}}
 .tw{animation:tw 8s steps(7,jump-none) infinite alternate}.l2{animation-name:tw2}.l3{animation-name:tw3}
 @keyframes tw{from{opacity:1}to{opacity:.12}}@keyframes tw2{from{opacity:1}to{opacity:.3}}@keyframes tw3{from{opacity:.85}to{opacity:.05}}
 .sk{animation:sk 8s steps(7,jump-none) infinite alternate}@keyframes sk{from{opacity:0}to{opacity:1}}
+.mt,.sat{opacity:0;animation:none 60s steps(10,end) infinite}.sat{animation-name:sat}${meteorCss}
 @media (max-aspect-ratio:1/1){.ha{transform:translate(-100px,4px)}.hd{transform:translate(-148px,-60px)}}
 @media (max-aspect-ratio:3/5){.ha{transform:translate(-112px,4px)}.hd{transform:translate(-176px,-64px)}}
 @media (min-aspect-ratio:2/1){.ha,.hb{transform:translate(0,24px)}.hc{transform:translate(0,-24px)}.hd{transform:translate(0,-28px)}}
-@media (prefers-reduced-motion:reduce){.sp,.tw,.sk{animation:none}}
-</style><defs>${live.map(l => l.defs).join('')}</defs><rect width="${W}" height="${H}" fill="#000"/><g fill="none" stroke-width="1">${paths(fieldPx)}<g class="hb">${paths(heroB)}</g><g class="hc">${paths(heroC)}</g>${paths(spikeBase)}${spikeSvg}${twSvg}</g>${live.map(l => l.svg).join('')}</svg>`
+@media (prefers-reduced-motion:reduce){.sp,.tw,.sk,.mt,.sat{animation:none}}
+</style><defs>${live.map(l => l.defs).join('')}</defs><rect width="${W}" height="${H}" fill="#000"/><g fill="none" stroke-width="1">${paths(fieldPx)}<g class="hb">${paths(heroB)}</g><g class="hc">${paths(heroC)}</g>${paths(spikeBase)}${spikeSvg}${twSvg}${meteorSvg}</g>${live.map(l => l.svg).join('')}</svg>`
 
 writeFileSync(process.argv[2], `// Generated by gen-scene.mjs: the "Deep space" backdrop, a pixel-art deep field\n// with slowly turning galaxies. It runs no script and loads nothing; CSS inside\n// its own <style> moves it.\nexport const SCENE = ${JSON.stringify(svg)}\n`)
 if (process.argv[3]) writeFileSync(process.argv[3], svg)
